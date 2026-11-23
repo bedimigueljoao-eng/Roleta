@@ -400,7 +400,7 @@ export const DemosAndAiPanel: React.FC<DemosAndAiPanelProps> = ({
         </h3>
         <p className="text-xs text-slate-300 leading-relaxed">
           O projeto já inclui <span className="font-mono text-slate-100">capacitor.config.ts</span>, o plugin nativo{' '}
-          <span className="font-mono text-slate-100">RouletteSplitBrowserPlugin.kt</span> (WebView em tela dividida com cookies preservados e captura de ROI sem gravação da tela inteira) e o workflow{' '}
+          <span className="font-mono text-slate-100">RouletteSplitBrowserPlugin.java</span> (WebView em tela dividida com cookies preservados e captura de ROI sem gravação da tela inteira) e o workflow{' '}
           <span className="font-mono text-slate-100">.github/workflows/android-apk.yml</span> para gerar e baixar o{' '}
           <span className="font-mono text-emerald-300">app-debug.apk</span> diretamente da aba Actions ao enviar para o GitHub.
         </p>

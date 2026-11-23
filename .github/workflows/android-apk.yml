@@ -16,7 +16,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Setup Java 21
         uses: actions/setup-java@v4
@@ -26,22 +25,29 @@ jobs:
 
       - name: Install dependencies & build web bundle
         run: |
-          npm ci
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+          npm install --no-save @capacitor/cli@^8.6.2 @capacitor/android@^8.6.2
           npm run build
 
       - name: Initialize Capacitor Android & copy native plugin
         run: |
-          npm install @capacitor/cli @capacitor/android
           if [ ! -d "android" ]; then
             npx cap add android
           fi
           mkdir -p android/app/src/main/java/ao/roletaquant/lab
-          cp android-plugin/RouletteSplitBrowserPlugin.kt android/app/src/main/java/ao/roletaquant/lab/RouletteSplitBrowserPlugin.kt
+          cp android-plugin/RouletteSplitBrowserPlugin.java android/app/src/main/java/ao/roletaquant/lab/RouletteSplitBrowserPlugin.java
+          cp android-plugin/MainActivity.java android/app/src/main/java/ao/roletaquant/lab/MainActivity.java
           npx cap sync android
 
       - name: Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
