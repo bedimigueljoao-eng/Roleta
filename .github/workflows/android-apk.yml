@@ -26,11 +26,11 @@ jobs:
       - name: Install dependencies & build web bundle
         run: |
           if [ -f package-lock.json ]; then
-            npm ci
+            npm ci --legacy-peer-deps
           else
-            npm install
+            npm install --legacy-peer-deps
           fi
-          npm install --no-save @capacitor/cli@^8.6.2 @capacitor/android@^8.6.2
+          npm install --no-save --legacy-peer-deps @capacitor/cli@^8.6.2 @capacitor/android@^8.6.2
           npm run build
 
       - name: Initialize Capacitor Android & copy native plugin
