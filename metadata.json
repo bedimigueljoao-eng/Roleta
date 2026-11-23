@@ -1,0 +1,8 @@
+{
+  "name": "Roleta Quant Lab",
+  "description": "Laboratório quantitativo para Roleta Europeia (0-36) com navegador embutido em tela dividida, captura OCR de até 500 giros, criador de estratégias, aprendizagem contínua, backtesting, gestão de banca e analista IA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
