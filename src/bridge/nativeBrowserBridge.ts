@@ -1,4 +1,5 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { PluginListenerHandle } from '@capacitor/core';
 import type { RoiRegion } from '../types/roulette';
 
 export interface RouletteSplitBrowserPluginInterface {
@@ -10,9 +11,17 @@ export interface RouletteSplitBrowserPluginInterface {
   closeSplitBrowser(): Promise<{ closed: boolean }>;
   updateSplitPercent(options: { splitPercent: number }): Promise<{ splitPercent: number }>;
   navigateTo(options: { url: string }): Promise<{ url: string }>;
+  setRoiOverlay(options: {
+    visible: boolean;
+    roi?: RoiRegion;
+  }): Promise<{ visible: boolean } & RoiRegion>;
   captureRoiFrame(options: {
     roi: RoiRegion;
   }): Promise<{ imageDataUrl: string; width: number; height: number }>;
+  addListener(
+    eventName: 'roiChanged',
+    listenerFunc: (roi: RoiRegion) => void
+  ): Promise<PluginListenerHandle>;
 }
 
 const NativePlugin = registerPlugin<RouletteSplitBrowserPluginInterface>('RouletteSplitBrowser');
@@ -63,6 +72,29 @@ export async function nativeNavigateUrl(url: string): Promise<void> {
   }
 }
 
+export async function nativeSetRoiOverlay(visible: boolean, roi?: RoiRegion): Promise<void> {
+  if (!isNativeAndroidPlatform()) return;
+  try {
+    await NativePlugin.setRoiOverlay({ visible, roi });
+  } catch {
+    // ignore
+  }
+}
+
+export async function nativeSubscribeRoiChanges(
+  onChange: (roi: RoiRegion) => void
+): Promise<(() => void) | null> {
+  if (!isNativeAndroidPlatform()) return null;
+  try {
+    const handle = await NativePlugin.addListener('roiChanged', onChange);
+    return () => {
+      handle.remove();
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * On Android APK: captures ONLY the native WebView ROI rectangle via PixelCopy/Bitmap
  * without recording the entire system screen.
@@ -89,8 +121,14 @@ export function cropCanvasByRoi(
 ): string {
   const sx = Math.max(0, Math.floor((roi.xPercent / 100) * sourceWidth));
   const sy = Math.max(0, Math.floor((roi.yPercent / 100) * sourceHeight));
-  const sw = Math.max(20, Math.min(sourceWidth - sx, Math.floor((roi.widthPercent / 100) * sourceWidth)));
-  const sh = Math.max(20, Math.min(sourceHeight - sy, Math.floor((roi.heightPercent / 100) * sourceHeight)));
+  const sw = Math.max(
+    20,
+    Math.min(sourceWidth - sx, Math.floor((roi.widthPercent / 100) * sourceWidth))
+  );
+  const sh = Math.max(
+    20,
+    Math.min(sourceHeight - sy, Math.floor((roi.heightPercent / 100) * sourceHeight))
+  );
 
   const canvas = document.createElement('canvas');
   canvas.width = sw;

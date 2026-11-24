@@ -2,22 +2,27 @@ import type { BankrollConfig, BankrollSessionState, SpinEntry } from '../types/r
 
 export const DEFAULT_BANKROLL_CONFIG: BankrollConfig = {
   initialBankroll: 1000,
-  baseChip: 10,
+  baseChip: 20,
+  minBetPercent: 2,
+  minBetFloor: 10,
+  maxWaitRounds: 6,
   stopLossAmount: 200,
   profitTargetAmount: 250,
   pauseAfterConsecutiveLosses: 3,
   antiMartingaleProtection: true,
   currencySymbol: 'Kz',
+  apiServerUrl: '',
 };
 
 /**
- * Computes real-time session bankroll state strictly from session spins that had an active ENTRAR decision.
+ * Computes real-time session bankroll state combining strategy signal stats
+ * and user-confirmed real wagers ("Apostei").
  */
 export function computeBankrollState(
   config: BankrollConfig,
   spins: SpinEntry[]
 ): BankrollSessionState {
-  let sessionNetProfit = 0;
+  let simNetProfit = 0;
   let consecutiveLosses = 0;
   let consecutiveWins = 0;
   let totalBetsPlaced = 0;
@@ -26,14 +31,36 @@ export function computeBankrollState(
   let peakProfit = 0;
   let maxSessionDrawdown = 0;
 
+  let realBetsPlaced = 0;
+  let realBetsWon = 0;
+  let realBetsLost = 0;
+  let realTotalWonAmount = 0;
+  let realTotalLostAmount = 0;
+  let realNetProfit = 0;
+
   for (const spin of spins) {
     if (spin.originBucket !== 'session') continue;
+
+    // 1. User-confirmed real bets ("Apostei")
+    if (spin.realBet) {
+      realBetsPlaced++;
+      realNetProfit += spin.realBet.profitAmount;
+      if (spin.realBet.won) {
+        realBetsWon++;
+        realTotalWonAmount += spin.realBet.profitAmount;
+      } else {
+        realBetsLost++;
+        realTotalLostAmount += Math.abs(spin.realBet.profitAmount);
+      }
+    }
+
+    // 2. Strategy signals
     const pred = spin.predictionResult;
     if (!pred || pred.action !== 'ENTRAR' || pred.outcome === 'SKIP') continue;
 
     const stake = config.baseChip;
     const profit = pred.netUnits * stake;
-    sessionNetProfit += profit;
+    simNetProfit += profit;
     totalBetsPlaced++;
 
     if (pred.outcome === 'OK') {
@@ -46,20 +73,30 @@ export function computeBankrollState(
       consecutiveWins = 0;
     }
 
-    if (sessionNetProfit > peakProfit) {
-      peakProfit = sessionNetProfit;
+    const activeTrackProfit = realBetsPlaced > 0 ? realNetProfit : simNetProfit;
+    if (activeTrackProfit > peakProfit) {
+      peakProfit = activeTrackProfit;
     }
-    const drawdown = peakProfit - sessionNetProfit;
+    const drawdown = peakProfit - activeTrackProfit;
     if (drawdown > maxSessionDrawdown) {
       maxSessionDrawdown = drawdown;
     }
   }
 
-  const currentBankroll = Number((config.initialBankroll + sessionNetProfit).toFixed(2));
+  // If user has placed real confirmed bets via "Apostei", bankroll reflects real balance!
+  const effectiveNetProfit = realBetsPlaced > 0 ? realNetProfit : simNetProfit;
+  const currentBankroll = Number(
+    Math.max(0, config.initialBankroll + effectiveNetProfit).toFixed(2)
+  );
+
+  // Recommended minimum stake strategy: max(table floor, bankroll * minBetPercent%)
+  const pctStake = Math.round((currentBankroll * (config.minBetPercent || 2)) / 100);
+  const minRecommendedBet = Math.max(config.minBetFloor || 10, pctStake);
+
   const stopLossReached =
-    config.stopLossAmount > 0 && sessionNetProfit <= -Math.abs(config.stopLossAmount);
+    config.stopLossAmount > 0 && effectiveNetProfit <= -Math.abs(config.stopLossAmount);
   const profitTargetReached =
-    config.profitTargetAmount > 0 && sessionNetProfit >= Math.abs(config.profitTargetAmount);
+    config.profitTargetAmount > 0 && effectiveNetProfit >= Math.abs(config.profitTargetAmount);
   const lossStreakTriggered =
     config.pauseAfterConsecutiveLosses > 0 &&
     consecutiveLosses >= config.pauseAfterConsecutiveLosses;
@@ -69,23 +106,30 @@ export function computeBankrollState(
 
   if (stopLossReached) {
     isPaused = true;
-    pauseReason = `Stop-loss atingido (${config.currencySymbol} ${sessionNetProfit.toFixed(0)}). Proteção de banca ativa.`;
+    pauseReason = `Stop-loss atingido (${config.currencySymbol} ${effectiveNetProfit.toFixed(0)}). Proteção de banca ativa.`;
   } else if (profitTargetReached) {
     isPaused = true;
-    pauseReason = `Meta de lucro alcançada (+${config.currencySymbol} ${sessionNetProfit.toFixed(0)}). Recomendado encerrar sessão.`;
+    pauseReason = `Meta de lucro alcançada (+${config.currencySymbol} ${effectiveNetProfit.toFixed(0)}). Recomendado encerrar sessão.`;
   } else if (lossStreakTriggered) {
     isPaused = true;
-    pauseReason = `Pausa automática após ${consecutiveLosses} perdas consecutivas (limite configurado: ${config.pauseAfterConsecutiveLosses}).`;
+    pauseReason = `Pausa automática após ${consecutiveLosses} perdas consecutivas (limite: ${config.pauseAfterConsecutiveLosses}).`;
   }
 
   return {
     currentBankroll,
-    sessionNetProfit: Number(sessionNetProfit.toFixed(2)),
+    sessionNetProfit: Number(effectiveNetProfit.toFixed(2)),
     consecutiveLosses,
     consecutiveWins,
     totalBetsPlaced,
     betsWon,
     betsLost,
+    realBetsPlaced,
+    realBetsWon,
+    realBetsLost,
+    realTotalWonAmount: Number(realTotalWonAmount.toFixed(2)),
+    realTotalLostAmount: Number(realTotalLostAmount.toFixed(2)),
+    realNetProfit: Number(realNetProfit.toFixed(2)),
+    minRecommendedBet,
     isPaused,
     pauseReason,
     stopLossReached,
@@ -96,7 +140,7 @@ export function computeBankrollState(
 }
 
 /**
- * Anti-Martingale sizing: never doubles stake after losses. Keeps 1 unit flat or conservative cap.
+ * Anti-Martingale sizing: never doubles stake after losses. Keeps 1 unit flat.
  */
 export function getRecommendedUnitSize(
   config: BankrollConfig,
@@ -104,10 +148,6 @@ export function getRecommendedUnitSize(
 ): number {
   if (state.isPaused) return 0;
   if (config.antiMartingaleProtection) {
-    // Strictly flat 1 unit when anti-Martingale protection is enabled, or 1.5x cap only after 2+ wins if bankroll is positive
-    if (state.consecutiveWins >= 2 && state.sessionNetProfit > 0) {
-      return 1;
-    }
     return 1;
   }
   return 1;

@@ -13,6 +13,7 @@ import {
   getCoveredNumbersForTarget,
   getNumberColor,
   getNumberParity,
+  getTargetPayoutMultiplier,
 } from './rouletteConstants';
 import { getRecommendedUnitSize } from './rouletteBankroll';
 
@@ -223,9 +224,20 @@ function evaluateSingleTrigger(
   trigger: StrategyTrigger,
   numbers: number[],
   strategyTarget: BetTargetType
-): { matched: boolean; strength: number; resolvedTarget?: BetTargetType; note: string } {
+): {
+  matched: boolean;
+  strength: number;
+  roundsRemaining: number;
+  resolvedTarget?: BetTargetType;
+  note: string;
+} {
   if (numbers.length === 0) {
-    return { matched: false, strength: 0, note: 'Aguardando giros iniciais.' };
+    return {
+      matched: false,
+      strength: 0,
+      roundsRemaining: trigger.threshold,
+      note: 'Aguardando giros iniciais.',
+    };
   }
 
   const resolvedTarget = resolveDynamicSubject(trigger.subject, numbers, strategyTarget);
@@ -235,10 +247,12 @@ function evaluateSingleTrigger(
     case 'dozen_gap': {
       const absence = countTrailingAbsence(numbers, resolvedTarget);
       const matched = absence >= trigger.threshold;
+      const roundsRemaining = Math.max(0, trigger.threshold - absence);
       const strength = Math.min(100, Math.round((absence / Math.max(1, trigger.threshold)) * 68));
       return {
         matched,
         strength,
+        roundsRemaining,
         resolvedTarget,
         note: `${BET_TARGET_LABELS[resolvedTarget]} ausente há ${absence} giros (gatilho ≥ ${trigger.threshold}).`,
       };
@@ -247,10 +261,12 @@ function evaluateSingleTrigger(
     case 'repeat_streak': {
       const streak = countTrailingRepeat(numbers, resolvedTarget);
       const matched = streak >= trigger.threshold;
+      const roundsRemaining = Math.max(0, trigger.threshold - streak);
       const strength = Math.min(100, Math.round((streak / Math.max(1, trigger.threshold)) * 65));
       return {
         matched,
         strength,
+        roundsRemaining,
         resolvedTarget,
         note: `${BET_TARGET_LABELS[resolvedTarget]} repetido ${streak}x seguidas (gatilho ≥ ${trigger.threshold}).`,
       };
@@ -263,6 +279,7 @@ function evaluateSingleTrigger(
       return {
         matched: hasZero,
         strength: hasZero ? 66 : 20,
+        roundsRemaining: hasZero ? 0 : 1,
         resolvedTarget: strategyTarget,
         note: hasZero
           ? `Zero (0) saiu nos últimos ${lookback} giros.`
@@ -276,10 +293,12 @@ function evaluateSingleTrigger(
       const covered = new Set(getCoveredNumbersForTarget(resolvedTarget));
       const hits = slice.filter((n) => covered.has(n)).length;
       const matched = slice.length >= Math.min(8, win) && hits >= trigger.threshold;
+      const roundsRemaining = matched ? 0 : Math.max(1, trigger.threshold - hits);
       const strength = Math.min(100, Math.round((hits / Math.max(1, trigger.threshold)) * 64));
       return {
         matched,
         strength,
+        roundsRemaining,
         resolvedTarget,
         note: `${BET_TARGET_LABELS[resolvedTarget]} com ${hits} acertos em ${slice.length} giros (mín. ${trigger.threshold}).`,
       };
@@ -291,10 +310,12 @@ function evaluateSingleTrigger(
       const covered = new Set(getCoveredNumbersForTarget(resolvedTarget));
       const hits = slice.filter((n) => covered.has(n)).length;
       const matched = slice.length >= Math.min(10, win) && hits <= trigger.threshold;
+      const roundsRemaining = matched ? 0 : Math.max(1, hits - trigger.threshold);
       const strength = matched ? 64 : 25;
       return {
         matched,
         strength,
+        roundsRemaining,
         resolvedTarget,
         note: `${BET_TARGET_LABELS[resolvedTarget]} com apenas ${hits} acertos em ${slice.length} giros (máx. ${trigger.threshold}).`,
       };
@@ -317,6 +338,7 @@ function evaluateSingleTrigger(
       return {
         matched,
         strength: matched ? Math.min(90, 55 + topCount * 8) : 25,
+        roundsRemaining: Math.max(0, trigger.threshold - topCount),
         resolvedTarget: strategyTarget,
         note: `Número #${topNum} apareceu ${topCount}x nos últimos ${slice.length} giros (gatilho ≥ ${trigger.threshold}).`,
       };
@@ -344,6 +366,7 @@ function evaluateSingleTrigger(
       return {
         matched,
         strength: matched ? Math.min(88, 52 + alternations * 7) : 22,
+        roundsRemaining: Math.max(0, trigger.threshold - alternations),
         resolvedTarget,
         note: `${alternations} alternâncias consecutivas detectadas (gatilho ≥ ${trigger.threshold}).`,
       };
@@ -371,6 +394,7 @@ export function evaluateStrategySignal(
       }),
       rawConfidence: 0,
       weightedScore: 0,
+      roundsRemaining: Math.max(1, 3 - historyOldestToNewest.length),
       reason: 'Amostra mínima de 3 giros necessária para avaliar gatilhos.',
     };
   }
@@ -384,7 +408,11 @@ export function evaluateStrategySignal(
       ? results.every((r) => r.matched)
       : results.some((r) => r.matched);
 
-  // If strategy uses dynamic subject (any_color / any_dozen / any_column / any_parity), follow the resolved target
+  const roundsRemaining =
+    strategy.triggerLogic === 'ALL'
+      ? Math.max(...results.map((r) => r.roundsRemaining))
+      : Math.min(...results.map((r) => r.roundsRemaining));
+
   const primarySubject = strategy.triggers[0]?.subject;
   const usesDynamicTarget =
     primarySubject === 'any_color' ||
@@ -410,7 +438,6 @@ export function evaluateStrategySignal(
     results.reduce((acc, r) => acc + r.strength, 0) / Math.max(1, results.length)
   );
 
-  // Check optional high-volatility guard: if last 10 spins have 2+ zeros or extreme chaos
   let volatilityBlocked = false;
   if (strategy.maxVolatilityPause && historyOldestToNewest.length >= 10) {
     const last10Zeros = historyOldestToNewest.slice(-10).filter((n) => n === 0).length;
@@ -438,13 +465,14 @@ export function evaluateStrategySignal(
     coveredNumbers,
     rawConfidence: avgStrength,
     weightedScore,
+    roundsRemaining: shouldEnter ? 0 : Math.max(1, roundsRemaining),
     reason,
   };
 }
 
 /**
  * Combines all enabled strategies weighted by continuous-learning `learnedWeight`,
- * applies bankroll guardrails, and emits the single Master Recommendation.
+ * applies bankroll guardrails, computes wait-horizon countdown and forced directional read.
  */
 export function buildMasterRecommendation(
   strategies: RouletteStrategy[],
@@ -454,6 +482,7 @@ export function buildMasterRecommendation(
   minConfluenceRequired = 1
 ): MasterRecommendation {
   const sampleSize = historyOldestToNewest.length;
+  const maxWaitCap = Math.max(1, bankrollConfig.maxWaitRounds || 6);
 
   if (bankrollState.isPaused) {
     return {
@@ -463,6 +492,10 @@ export function buildMasterRecommendation(
       coveredNumbers: [],
       confidence: 0,
       suggestedUnits: 0,
+      payoutMultiplier: 0,
+      roundsToWait: null,
+      waitLabel: 'Sessão pausada por proteção de banca',
+      forcedSuggestion: null,
       contributingSignals: [],
       reasons: [bankrollState.pauseReason ?? 'Proteção de banca ativa.'],
       blockedByBankroll: true,
@@ -480,6 +513,10 @@ export function buildMasterRecommendation(
       coveredNumbers: [],
       confidence: 0,
       suggestedUnits: 0,
+      payoutMultiplier: 0,
+      roundsToWait: null,
+      waitLabel: 'Ative pelo menos 1 estratégia',
+      forcedSuggestion: null,
       contributingSignals: [],
       reasons: ['Ative pelo menos uma estratégia no Criador de Estratégias.'],
       blockedByBankroll: false,
@@ -490,24 +527,58 @@ export function buildMasterRecommendation(
   const signals = enabled.map((s) => evaluateStrategySignal(s, historyOldestToNewest));
   const enterSignals = signals.filter((sig) => sig.action === 'ENTRAR');
 
+  // Best directional lean even while waiting (used when user clicks "Ignorar Aguardar")
+  const bestDirectionalSignal = [...signals].sort(
+    (a, b) => b.rawConfidence - a.rawConfidence || a.roundsRemaining - b.roundsRemaining
+  )[0];
+
+  const forcedSuggestion = bestDirectionalSignal
+    ? {
+        betTarget: bestDirectionalSignal.betTarget,
+        targetLabel: BET_TARGET_LABELS[bestDirectionalSignal.betTarget],
+        coveredNumbers: bestDirectionalSignal.coveredNumbers,
+        confidence: Math.max(35, bestDirectionalSignal.rawConfidence),
+        payoutMultiplier: getTargetPayoutMultiplier(
+          bestDirectionalSignal.betTarget,
+          bestDirectionalSignal.coveredNumbers.length
+        ),
+        reason: bestDirectionalSignal.reason,
+      }
+    : null;
+
   if (enterSignals.length === 0 || enterSignals.length < minConfluenceRequired) {
+    const minWait = Math.min(...signals.map((s) => Math.max(1, s.roundsRemaining)));
+    const cappedWait = Math.min(maxWaitCap, minWait);
+    const waitLabel =
+      minWait > maxWaitCap
+        ? `Aguardar até ${maxWaitCap} rodadas (gatilho estimado em ~${minWait})`
+        : `Aguardar ~${cappedWait} rodada${cappedWait > 1 ? 's' : ''}`;
+
     return {
       action: 'AGUARDAR',
       betTarget: null,
-      targetLabel: 'Aguardar próximo gatilho',
+      targetLabel: waitLabel,
       coveredNumbers: [],
       confidence: Math.max(
         0,
         ...signals.map((s) => Math.min(48, Math.round(s.rawConfidence * 0.7)))
       ),
       suggestedUnits: 0,
+      payoutMultiplier: forcedSuggestion?.payoutMultiplier ?? 1,
+      roundsToWait: cappedWait,
+      waitLabel,
+      forcedSuggestion,
       contributingSignals: signals,
       reasons:
         enterSignals.length > 0 && enterSignals.length < minConfluenceRequired
           ? [
               `Confluência insuficiente: ${enterSignals.length} sinal(is) ativo(s), mínimo exigido ${minConfluenceRequired}.`,
             ]
-          : ['Nenhum gatilho objetivo atingiu o limiar de entrada neste giro.'],
+          : [
+              bestDirectionalSignal
+                ? `${waitLabel}. Mais próximo: ${bestDirectionalSignal.strategyName} (${bestDirectionalSignal.reason})`
+                : 'Nenhum gatilho objetivo atingiu o limiar de entrada neste giro.',
+            ],
       blockedByBankroll: false,
       sampleSize,
     };
@@ -551,6 +622,10 @@ export function buildMasterRecommendation(
       coveredNumbers: [],
       confidence: 0,
       suggestedUnits: 0,
+      payoutMultiplier: 0,
+      roundsToWait: 1,
+      waitLabel: 'Aguardar 1 rodada',
+      forcedSuggestion,
       contributingSignals: signals,
       reasons: ['Sem consenso válido entre estratégias.'],
       blockedByBankroll: false,
@@ -568,6 +643,7 @@ export function buildMasterRecommendation(
   );
 
   const unitSize = getRecommendedUnitSize(bankrollConfig, bankrollState);
+  const payoutMultiplier = getTargetPayoutMultiplier(bestTarget, chosen.covered.length);
 
   return {
     action: 'ENTRAR',
@@ -576,6 +652,10 @@ export function buildMasterRecommendation(
     coveredNumbers: chosen.covered,
     confidence: avgConfidence,
     suggestedUnits: unitSize,
+    payoutMultiplier,
+    roundsToWait: 0,
+    waitLabel: 'Entrada confirmada agora',
+    forcedSuggestion,
     contributingSignals: chosen.signals,
     reasons: chosen.signals.map((s) => `${s.strategyName}: ${s.reason}`),
     blockedByBankroll: false,

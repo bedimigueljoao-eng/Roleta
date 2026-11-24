@@ -1,3 +1,4 @@
+import { createWorker } from 'tesseract.js';
 import type {
   AiAnalysisResult,
   BankrollSessionState,
@@ -5,6 +6,63 @@ import type {
   RouletteStatsSummary,
   RouletteStrategy,
 } from '../types/roulette';
+import { isValidRouletteNumber } from './rouletteConstants';
+
+function buildApiUrl(path: string, customBaseUrl?: string): string {
+  const base = (customBaseUrl ?? '').trim().replace(/\/+$/, '');
+  if (!base) return path;
+  return `${base}${path}`;
+}
+
+/**
+ * Enhances contrast & upscales a cropped roulette strip DataURL for higher-accuracy local Tesseract OCR.
+ */
+async function preprocessImageForOcr(dataUrl: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = img.width < 600 ? 2 : 1;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, img.width * scale);
+      canvas.height = Math.max(1, img.height * scale);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.filter = 'grayscale(100%) contrast(155%) brightness(110%)';
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+async function runLocalTesseractOcr(
+  imageDataUrl: string,
+  maxNumbers: number
+): Promise<number[]> {
+  try {
+    const enhancedUrl = await preprocessImageForOcr(imageDataUrl);
+    const worker = await createWorker('eng');
+    await worker.setParameters({
+      tessedit_char_whitelist: '0123456789 ,.-|',
+    });
+    const {
+      data: { text },
+    } = await worker.recognize(enhancedUrl);
+    await worker.terminate();
+
+    const matches = text.match(/\b\d{1,2}\b/g) ?? [];
+    return matches
+      .map((m) => Number(m))
+      .filter((n) => isValidRouletteNumber(n))
+      .slice(0, maxNumbers);
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Deterministic local quantitative analyst fallback when offline or running standalone APK without server.
@@ -134,9 +192,10 @@ export async function requestRouletteAiAnalysis(payload: {
   strategies: RouletteStrategy[];
   bankroll: BankrollSessionState;
   recentNumbers: number[];
+  apiServerUrl?: string;
 }): Promise<AiAnalysisResult> {
   try {
-    const res = await fetch('/api/roulette-ai', {
+    const res = await fetch(buildApiUrl('/api/roulette-ai', payload.apiServerUrl), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -187,12 +246,17 @@ export async function requestRouletteAiAnalysis(payload: {
   );
 }
 
+/**
+ * Extracts roulette numbers (0..36) from screenshot via Gemini Server OCR (if reachable),
+ * automatically falling back to local on-device Tesseract OCR (works inside Android APK offline too!).
+ */
 export async function extractNumbersFromScreenshot(
   imageBase64DataUrl: string,
-  maxNumbers = 500
-): Promise<{ numbers: number[]; method: 'gemini-ocr' | 'local-none'; note: string }> {
+  maxNumbers = 500,
+  apiServerUrl?: string
+): Promise<{ numbers: number[]; method: 'gemini-ocr' | 'tesseract-local' | 'local-none'; note: string }> {
   try {
-    const res = await fetch('/api/roulette-ocr', {
+    const res = await fetch(buildApiUrl('/api/roulette-ocr', apiServerUrl), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -203,23 +267,35 @@ export async function extractNumbersFromScreenshot(
 
     if (res.ok) {
       const data = (await res.json()) as { numbers?: number[]; note?: string };
-      if (Array.isArray(data.numbers)) {
-        return {
-          numbers: data.numbers.filter((n) => Number.isInteger(n) && n >= 0 && n <= 36),
-          method: 'gemini-ocr',
-          note:
-            data.note ??
-            `Extraídos ${data.numbers.length} número(s) válidos (0–36). Confira na prévia antes de aplicar.`,
-        };
+      if (Array.isArray(data.numbers) && data.numbers.length > 0) {
+        const clean = data.numbers.filter((n) => Number.isInteger(n) && n >= 0 && n <= 36);
+        if (clean.length > 0) {
+          return {
+            numbers: clean,
+            method: 'gemini-ocr',
+            note:
+              data.note ??
+              `OCR Servidor extraiu ${clean.length} número(s) válidos (0–36). Confira na prévia antes de enviar.`,
+          };
+        }
       }
     }
   } catch {
-    // ignore network failure
+    // Server unavailable (e.g., standalone APK) -> proceed directly to on-device Tesseract OCR
+  }
+
+  const localNumbers = await runLocalTesseractOcr(imageBase64DataUrl, maxNumbers);
+  if (localNumbers.length > 0) {
+    return {
+      numbers: localNumbers,
+      method: 'tesseract-local',
+      note: `OCR Local (Tesseract) extraiu ${localNumbers.length} número(s) da ROI. Confira na prévia editável antes de aplicar.`,
+    };
   }
 
   return {
     numbers: [],
     method: 'local-none',
-    note: 'Servidor OCR indisponível ou imagem sem resposta automática. Cole os números ou edite manualmente na prévia abaixo.',
+    note: 'Não foi possível ler números nítidos nesta área. Ajuste o quadro ROI sobre os números ou digite/cole manualmente na prévia abaixo.',
   };
 }

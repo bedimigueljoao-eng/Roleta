@@ -28,6 +28,13 @@ export interface SpinEntry {
     netUnits: number;
     confidence: number;
   };
+  /** User-confirmed real wager ("Apostei") settled when this spin landed */
+  realBet?: {
+    targetLabel: string;
+    stakeAmount: number;
+    won: boolean;
+    profitAmount: number;
+  };
 }
 
 export type BetTargetType =
@@ -104,6 +111,16 @@ export interface StrategySignal {
   coveredNumbers: number[];
   rawConfidence: number; // 0..100
   weightedScore: number;
+  roundsRemaining: number; // 0 when ready to trigger, >0 estimated rounds to trigger
+  reason: string;
+}
+
+export interface ForcedDirectionalSuggestion {
+  betTarget: BetTargetType;
+  targetLabel: string;
+  coveredNumbers: number[];
+  confidence: number;
+  payoutMultiplier: number;
   reason: string;
 }
 
@@ -114,6 +131,10 @@ export interface MasterRecommendation {
   coveredNumbers: number[];
   confidence: number; // 0..100
   suggestedUnits: number;
+  payoutMultiplier: number;
+  roundsToWait: number | null;
+  waitLabel: string;
+  forcedSuggestion: ForcedDirectionalSuggestion | null;
   contributingSignals: StrategySignal[];
   reasons: string[];
   blockedByBankroll: boolean;
@@ -215,11 +236,15 @@ export interface StrategySnapshot {
 export interface BankrollConfig {
   initialBankroll: number;
   baseChip: number;
+  minBetPercent: number; // e.g. 1% or 2% of current bankroll
+  minBetFloor: number; // minimum table chip in currency
+  maxWaitRounds: number; // e.g. 6 rounds max wait horizon
   stopLossAmount: number;
   profitTargetAmount: number;
   pauseAfterConsecutiveLosses: number;
   antiMartingaleProtection: boolean;
   currencySymbol: string;
+  apiServerUrl?: string; // optional remote API base URL for standalone APK OCR/AI
 }
 
 export interface BankrollSessionState {
@@ -230,6 +255,13 @@ export interface BankrollSessionState {
   totalBetsPlaced: number;
   betsWon: number;
   betsLost: number;
+  realBetsPlaced: number;
+  realBetsWon: number;
+  realBetsLost: number;
+  realTotalWonAmount: number;
+  realTotalLostAmount: number;
+  realNetProfit: number;
+  minRecommendedBet: number;
   isPaused: boolean;
   pauseReason: string | null;
   stopLossReached: boolean;

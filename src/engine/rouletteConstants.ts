@@ -213,6 +213,34 @@ export function evaluateTargetNetUnits(
   return { won: true, netUnits: Number((36 / k - 1).toFixed(4)) };
 }
 
+export function getTargetPayoutMultiplier(
+  target: BetTargetType,
+  coveredCount: number
+): number {
+  if (
+    target === 'red' ||
+    target === 'black' ||
+    target === 'even' ||
+    target === 'odd' ||
+    target === 'low' ||
+    target === 'high'
+  ) {
+    return 1;
+  }
+  if (
+    target === 'dozen_1' ||
+    target === 'dozen_2' ||
+    target === 'dozen_3' ||
+    target === 'col_1' ||
+    target === 'col_2' ||
+    target === 'col_3'
+  ) {
+    return 2;
+  }
+  if (coveredCount <= 0) return 0;
+  return Number((36 / coveredCount - 1).toFixed(2));
+}
+
 export function getTheoreticalHitRate(target: BetTargetType, coveredCount: number): number {
   if (coveredCount <= 0) return 0;
   return Number(((coveredCount / 37) * 100).toFixed(2));

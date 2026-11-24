@@ -39,6 +39,7 @@ import {
 } from './utils/storage';
 import { SplitBrowserTab } from './components/SplitBrowserTab';
 import { ManualTab } from './components/ManualTab';
+import { type PendingRealBet } from './components/DecisionCockpit';
 import { StrategyBuilderPanel } from './components/StrategyBuilderPanel';
 import { LearningBacktestPanel } from './components/LearningBacktestPanel';
 import { StatsAndBankrollPanel } from './components/StatsAndBankrollPanel';
@@ -55,9 +56,10 @@ export default function App() {
   // Session state (kept separate from learning backup)
   const [spins, setSpins] = useState<SpinEntry[]>([]);
   const [browserUrl, setBrowserUrl] = useState('https://www.kwanzabet.ao');
-  const [splitPercent, setSplitPercent] = useState(56);
+  const [splitPercent, setSplitPercent] = useState(48);
   const [roiRegion, setRoiRegion] = useState<RoiRegion>(DEFAULT_ROI_REGION);
   const [minConfluence, setMinConfluence] = useState(1);
+  const [pendingBet, setPendingBet] = useState<PendingRealBet | null>(null);
 
   // Learning & Bankroll backup state
   const [strategies, setStrategies] = useState<RouletteStrategy[]>(BUILTIN_STRATEGIES);
@@ -183,6 +185,21 @@ export default function App() {
       };
     }
 
+    let realBet: SpinEntry['realBet'];
+    if (pendingBet) {
+      const won = pendingBet.coveredNumbers.includes(num);
+      const profitAmount = won
+        ? Number((pendingBet.stakeAmount * pendingBet.payoutMultiplier).toFixed(2))
+        : -pendingBet.stakeAmount;
+      realBet = {
+        targetLabel: pendingBet.targetLabel,
+        stakeAmount: pendingBet.stakeAmount,
+        won,
+        profitAmount,
+      };
+      setPendingBet(null);
+    }
+
     const entry: SpinEntry = {
       id: `spin_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       number: num,
@@ -190,6 +207,7 @@ export default function App() {
       source,
       originBucket: 'session',
       predictionResult,
+      realBet,
     };
 
     setSpins((prev) => [...prev, entry]);
@@ -204,9 +222,14 @@ export default function App() {
     const valid = numbers.filter(isValidRouletteNumber);
     if (valid.length === 0) return;
 
+    const betToSettle = bucket === 'session' ? pendingBet : null;
+    if (betToSettle) {
+      setPendingBet(null);
+    }
+
     setSpins((prev) => {
       let runningSpins = [...prev];
-      for (const n of valid) {
+      valid.forEach((n, idx) => {
         const runningNumbers = runningSpins.map((s) => s.number);
         const runningBankroll = computeBankrollState(bankrollConfig, runningSpins);
         const rec = buildMasterRecommendation(
@@ -237,15 +260,29 @@ export default function App() {
           };
         }
 
+        let realBet: SpinEntry['realBet'];
+        if (idx === 0 && betToSettle) {
+          const won = betToSettle.coveredNumbers.includes(n);
+          realBet = {
+            targetLabel: betToSettle.targetLabel,
+            stakeAmount: betToSettle.stakeAmount,
+            won,
+            profitAmount: won
+              ? Number((betToSettle.stakeAmount * betToSettle.payoutMultiplier).toFixed(2))
+              : -betToSettle.stakeAmount,
+          };
+        }
+
         runningSpins.push({
-          id: `spin_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          id: `spin_${Date.now()}_${idx}_${Math.random().toString(36).slice(2, 7)}`,
           number: n,
           timestamp: Date.now(),
           source,
           originBucket: bucket,
           predictionResult,
+          realBet,
         });
-      }
+      });
       return runningSpins;
     });
   };
@@ -272,13 +309,17 @@ export default function App() {
   };
 
   const handleClearSessionSpins = () => {
+    setPendingBet(null);
     setSpins((prev) => prev.filter((s) => s.originBucket === 'historical'));
   };
 
   const handleResetSessionBankrollCounters = () => {
+    setPendingBet(null);
     setSpins((prev) =>
       prev.map((s) =>
-        s.originBucket === 'session' ? { ...s, predictionResult: undefined } : s
+        s.originBucket === 'session'
+          ? { ...s, predictionResult: undefined, realBet: undefined }
+          : s
       )
     );
   };
@@ -452,6 +493,9 @@ export default function App() {
             bankrollConfig={bankrollConfig}
             bankrollState={bankrollState}
             spins={spins}
+            pendingBet={pendingBet}
+            onArmPendingBet={setPendingBet}
+            onChangeBankrollConfig={setBankrollConfig}
             onSubmitNumber={(num) => handleAddSingleSpin(num, 'manual')}
             onBatchAddNumbers={handleBatchAddNumbers}
             onUndoLastSpin={handleUndoLastSpin}
@@ -466,6 +510,9 @@ export default function App() {
             bankrollConfig={bankrollConfig}
             bankrollState={bankrollState}
             spins={spins}
+            pendingBet={pendingBet}
+            onArmPendingBet={setPendingBet}
+            onChangeBankrollConfig={setBankrollConfig}
             onSubmitNumber={(num) => handleAddSingleSpin(num, 'manual')}
             onReplaceHistoricalBase={handleReplaceHistoricalBase}
             onClearHistoricalBase={handleClearHistoricalBase}
@@ -522,10 +569,10 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile Bottom Ergonomic Thumb Bar (<= 15% viewport height) */}
+      {/* Mobile Bottom Ergonomic Thumb Bar with safe-area padding */}
       <nav
         aria-label="Navegação móvel"
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 h-14 bg-[#0B0F17]/95 backdrop-blur-md border-t border-[#1E293B] grid grid-cols-5 items-center"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 min-h-[56px] pb-[env(safe-area-inset-bottom,0px)] bg-[#0B0F17]/95 backdrop-blur-md border-t border-[#1E293B] grid grid-cols-5 items-center"
       >
         <button
           type="button"

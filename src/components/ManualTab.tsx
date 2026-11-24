@@ -18,7 +18,7 @@ import type {
 import { extractNumbersFromScreenshot } from '../engine/rouletteAiAnalyst';
 import { ROULETTE_DEMOS, parseRouletteNumbersFromText } from '../data/rouletteDemos';
 import { getNumberColor } from '../engine/rouletteConstants';
-import { DecisionCockpit } from './DecisionCockpit';
+import { DecisionCockpit, type PendingRealBet } from './DecisionCockpit';
 import { EuropeanWheelAndTable } from './EuropeanWheelAndTable';
 import { RouletteNumberChip } from './RouletteNumberChip';
 
@@ -28,6 +28,9 @@ interface ManualTabProps {
   bankrollConfig: BankrollConfig;
   bankrollState: BankrollSessionState;
   spins: SpinEntry[];
+  pendingBet: PendingRealBet | null;
+  onArmPendingBet: (bet: PendingRealBet | null) => void;
+  onChangeBankrollConfig: (next: BankrollConfig) => void;
   onSubmitNumber: (num: number) => void;
   onReplaceHistoricalBase: (numbers: number[], source: 'ocr_500' | 'demo' | 'import') => void;
   onClearHistoricalBase: () => void;
@@ -41,6 +44,9 @@ export const ManualTab: React.FC<ManualTabProps> = ({
   bankrollConfig,
   bankrollState,
   spins,
+  pendingBet,
+  onArmPendingBet,
+  onChangeBankrollConfig,
   onSubmitNumber,
   onReplaceHistoricalBase,
   onClearHistoricalBase,
@@ -65,7 +71,7 @@ export const ManualTab: React.FC<ManualTabProps> = ({
     setPreviewImageUrl(dataUrl);
     setOcrLoading(true);
     setOcrNote('Processando print dos até 500 resultados anteriores...');
-    const res = await extractNumbersFromScreenshot(dataUrl, 500);
+    const res = await extractNumbersFromScreenshot(dataUrl, 500, bankrollConfig.apiServerUrl);
     setOcrLoading(false);
     setPreviewNumbers(res.numbers);
     setPasteText(res.numbers.join(', '));
@@ -180,6 +186,9 @@ export const ManualTab: React.FC<ManualTabProps> = ({
         bankrollConfig={bankrollConfig}
         bankrollState={bankrollState}
         spins={spins}
+        pendingBet={pendingBet}
+        onArmPendingBet={onArmPendingBet}
+        onChangeBankrollConfig={onChangeBankrollConfig}
         onSubmitNumber={onSubmitNumber}
         onUndoLastSpin={onUndoLastSpin}
         onClearSessionSpins={onClearSessionSpins}

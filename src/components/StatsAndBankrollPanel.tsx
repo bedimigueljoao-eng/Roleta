@@ -120,9 +120,9 @@ export const StatsAndBankrollPanel: React.FC<StatsAndBankrollPanelProps> = ({
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
           <div className="bg-[#0E141F] border border-[#1E293B] rounded-lg p-3">
-            <span className="text-slate-400">Banca Atual</span>
+            <span className="text-slate-400">Saldo Atual</span>
             <p className="font-mono text-lg font-bold tabular-nums text-slate-100 mt-0.5">
               {bankrollConfig.currencySymbol} {bankrollState.currentBankroll.toFixed(0)}
             </p>
@@ -139,22 +139,34 @@ export const StatsAndBankrollPanel: React.FC<StatsAndBankrollPanelProps> = ({
             </p>
           </div>
           <div className="bg-[#0E141F] border border-[#1E293B] rounded-lg p-3">
+            <span className="text-slate-400">Aposta Mín. Sugerida</span>
+            <p className="font-mono text-lg font-bold tabular-nums text-emerald-300 mt-0.5">
+              {bankrollConfig.currencySymbol} {bankrollState.minRecommendedBet}
+            </p>
+          </div>
+          <div className="bg-[#0E141F] border border-[#1E293B] rounded-lg p-3">
+            <span className="text-slate-400">Apostas ("Apostei")</span>
+            <p className="font-mono text-lg font-bold tabular-nums text-slate-100 mt-0.5">
+              {bankrollState.realBetsWon}W / {bankrollState.realBetsLost}L
+            </p>
+          </div>
+          <div className="bg-[#0E141F] border border-[#1E293B] rounded-lg p-3">
             <span className="text-slate-400">Perdas Seguidas</span>
             <p className="font-mono text-lg font-bold tabular-nums text-amber-300 mt-0.5">
               {bankrollState.consecutiveLosses} / {bankrollConfig.pauseAfterConsecutiveLosses}
             </p>
           </div>
           <div className="bg-[#0E141F] border border-[#1E293B] rounded-lg p-3">
-            <span className="text-slate-400">Drawdown Máx. Sessão</span>
+            <span className="text-slate-400">Drawdown Máx.</span>
             <p className="font-mono text-lg font-bold tabular-nums text-slate-200 mt-0.5">
               -{bankrollConfig.currencySymbol} {bankrollState.maxSessionDrawdown.toFixed(0)}
             </p>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3 text-xs">
           <label className="space-y-1">
-            <span className="text-slate-400">Banca Inicial</span>
+            <span className="text-slate-400">Saldo Inicial</span>
             <input
               type="number"
               min={10}
@@ -169,15 +181,48 @@ export const StatsAndBankrollPanel: React.FC<StatsAndBankrollPanelProps> = ({
             />
           </label>
           <label className="space-y-1">
-            <span className="text-slate-400">Ficha Base</span>
+            <span className="text-slate-400">% Mín. Banca</span>
             <input
               type="number"
-              min={1}
-              value={bankrollConfig.baseChip}
+              min={0.5}
+              max={20}
+              step={0.5}
+              value={bankrollConfig.minBetPercent}
               onChange={(e) =>
                 onChangeBankrollConfig({
                   ...bankrollConfig,
-                  baseChip: Math.max(1, Number(e.target.value)),
+                  minBetPercent: Math.max(0.5, Number(e.target.value)),
+                })
+              }
+              className="w-full min-h-[40px] px-3 rounded-lg bg-[#0E141F] border border-[#263248] font-mono text-slate-100"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-400">Piso Ficha Mín.</span>
+            <input
+              type="number"
+              min={1}
+              value={bankrollConfig.minBetFloor}
+              onChange={(e) =>
+                onChangeBankrollConfig({
+                  ...bankrollConfig,
+                  minBetFloor: Math.max(1, Number(e.target.value)),
+                })
+              }
+              className="w-full min-h-[40px] px-3 rounded-lg bg-[#0E141F] border border-[#263248] font-mono text-slate-100"
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="text-slate-400">Máx. Rod. Aguardar</span>
+            <input
+              type="number"
+              min={1}
+              max={20}
+              value={bankrollConfig.maxWaitRounds}
+              onChange={(e) =>
+                onChangeBankrollConfig({
+                  ...bankrollConfig,
+                  maxWaitRounds: Math.max(1, Number(e.target.value)),
                 })
               }
               className="w-full min-h-[40px] px-3 rounded-lg bg-[#0E141F] border border-[#263248] font-mono text-slate-100"
@@ -214,7 +259,7 @@ export const StatsAndBankrollPanel: React.FC<StatsAndBankrollPanelProps> = ({
             />
           </label>
           <label className="space-y-1">
-            <span className="text-slate-400">Pausa após N Perdas</span>
+            <span className="text-slate-400">Pausa N Perdas</span>
             <input
               type="number"
               min={1}
@@ -245,6 +290,24 @@ export const StatsAndBankrollPanel: React.FC<StatsAndBankrollPanelProps> = ({
             />
           </label>
         </div>
+
+        <label className="block space-y-1 text-xs">
+          <span className="text-slate-400">
+            URL do Servidor Web para OCR/IA Remoto no APK (opcional — se vazio, o APK usa OCR Tesseract local)
+          </span>
+          <input
+            type="text"
+            value={bankrollConfig.apiServerUrl ?? ''}
+            onChange={(e) =>
+              onChangeBankrollConfig({
+                ...bankrollConfig,
+                apiServerUrl: e.target.value,
+              })
+            }
+            placeholder="https://ais-pre-7ld5wmno2viwjrdq2ixkn2-645195427867.europe-west3.run.app"
+            className="w-full min-h-[38px] px-3 rounded-lg bg-[#0E141F] border border-[#263248] font-mono text-slate-100"
+          />
+        </label>
 
         <label className="flex items-center gap-2.5 text-xs text-slate-200 cursor-pointer">
           <input

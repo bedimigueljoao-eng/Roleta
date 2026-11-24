@@ -33,15 +33,15 @@ export interface StoredLearningState {
 
 export const DEFAULT_ROI_REGION: RoiRegion = {
   xPercent: 4,
-  yPercent: 72,
+  yPercent: 68,
   widthPercent: 92,
-  heightPercent: 18,
+  heightPercent: 20,
 };
 
 export const DEFAULT_SESSION_STATE: StoredSessionState = {
   spins: [],
   browserUrl: 'https://www.kwanzabet.ao',
-  splitPercent: 56,
+  splitPercent: 48,
   roiRegion: DEFAULT_ROI_REGION,
   minConfluence: 1,
   updatedAt: Date.now(),

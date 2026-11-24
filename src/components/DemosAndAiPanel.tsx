@@ -74,6 +74,7 @@ export const DemosAndAiPanel: React.FC<DemosAndAiPanelProps> = ({
       strategies,
       bankroll: bankrollState,
       recentNumbers: spins.map((s) => s.number),
+      apiServerUrl: bankrollConfig.apiServerUrl,
     });
     setAiResult(result);
     setAiLoading(false);
